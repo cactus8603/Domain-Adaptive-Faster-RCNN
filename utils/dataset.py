@@ -4,12 +4,20 @@ from pycocotools.coco import COCO
 import os
 import torch
 import copy
+import cv2
 from PIL import Image
 from glob import glob
 
 
 def get_transform(*args, **kwargs):
-    ...
+    transform = T.Compose([
+        T.ToPILImage(),
+        T.Resize(224,224),
+        T.ToTensor(),
+        T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+    ])
+
+    
     # TODO
     # perform data augmentation
     # convert data type and value range
@@ -18,13 +26,21 @@ def get_transform(*args, **kwargs):
 
 class SourceDataset(Dataset):
 
-    def __init__(self, root: str, split: str = "train", transform=None, *args, **kwargs) -> None:
+    def __init__(self, img_path, json_path, transform=None, *args, **kwargs) -> None:
         super().__init__()
-        self.coco = COCO(...)
+
+        self.coco = COCO(annotation_file=json_path)
+        self.ids = list(sorted(self.coco.imgs.keys()))
+        self.img_path = img_path
         # TODO
 
     def _load_image(self, index: int):
-        ...
+        path = self.coco.loadImgs(index)[0]['file_name']
+        
+        # img_path: path to folder
+        # ex path:org/val/2575.png
+        img = cv2.imread(os.path.join(self.img_path, path))
+        img = Image.open(os.path.join(self.img_path, path)).convert('RGB')
         # return image
 
     def _load_target(self, index: int):
@@ -65,7 +81,7 @@ class SourceDataset(Dataset):
         # return image and target
 
     def __len__(self) -> int:
-        ...
+        return len(self.ids)
         # return the length of dataset
 
 
