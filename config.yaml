@@ -1,0 +1,64 @@
+device: "0,1,2,3,4,5"
+
+seed: 8603
+
+# for train data
+# train style classifier with 142 fonts
+# data_path: "../../data/Font/byFont"     
+# n_classes: 142
+
+# train word classifier with 12948 words
+data_path: "../../data/Font/byUnicode"  
+n_classes: 12948
+
+
+# for eval data
+val_data_path: "./image/rare1107"
+
+model_save_path: "../../data/model_performance/content/from_handover/convnext_large/" # "./result/content/from_handover/efficientnetv2_m/"
+
+### DDP setting
+use_ddp: True
+port: 8888 # 8994
+
+### training setting
+
+# eval
+# load_model_path: "./result/style/from_handover/convnext_large/model_10_0.844_.pth"
+
+# continue training
+load_state: False
+skip_epoch: 0
+
+# data
+spilt_rate: 0.8
+
+# data loader
+batch_size: 64
+num_workers: 6
+
+# lr
+lr: 0.01
+
+# scheduler
+lrf: 0.0005
+momentum: 0.937
+weight_decay: 0.00005
+warmup: False
+warmup_step: 5
+warmup_start_value: 0.001 # 0.0001
+
+# other
+epoch: 500
+accumulation_step: 8
+cosanneal_cycle: 50 # 30
+save_frequency: 2
+reAttention: True
+
+### Model 
+
+drop_p: 0
+expansion: 4
+in_channels: 3
+
+
