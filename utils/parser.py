@@ -12,6 +12,12 @@ def create_parser():
     parser.add_argument("batch_size", default="64", help='batch size of dataloader')
     parser.add_argument("num_workers", default="6", help='num_workers of dataloader')
     parser.add_argument("seed", default="8603", help='random seed')
+    parser.add_argument("lr", default="0.01", help='')
+    parser.add_argument("momentum", default="0.937", help='')
+    parser.add_argument("weight_decay", default="0.00005", help='')
+    parser.add_argument("epoch", default="200", help='')
+    parser.add_argument("accumulation", default="8", help='')
+    parser.add_argument("cosanneal_cycle", default="50", help='')
     # parser.add_argument("", default="", help='')
     args = parser.parse_args()
     return args
