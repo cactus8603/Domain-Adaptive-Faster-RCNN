@@ -5,7 +5,7 @@ from da_heads import DomainAdaptationModule
 
 
 class DA_model(nn.Module):
-    def __init__(self, n_classes, load_source_model=False, ddp_gpu) -> None:
+    def __init__(self, n_classes, device, load_source_model=False):
         super().__init__()
 
         # setup main object detection model
@@ -25,7 +25,7 @@ class DA_model(nn.Module):
 
         self.create_hooks()
         self.da_model = DomainAdaptationModule()
-        self.device = 'cuda:' + str(self.device)
+        self.device = device
     
     def create_hooks(self):
         # setup hooks for hooking features needed by domain adaptation

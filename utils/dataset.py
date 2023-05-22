@@ -23,19 +23,14 @@ def get_transform(mode, *args, **kwargs):
                 A.Blur(blur_limit=3, p=0.5),
                 A.ColorJitter(p=0.5),
             ], p=1.0),
+            A.augmentations.transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
             ToTensorV2(),
-            A.augmentations.transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
         ], bbox_params=A.BboxParams(format='coco'))
-    else :
+    elif mode == 'val' :
         transform = A.Compose([
             A.Resize(480,480),
-            # A.RandomBrightnessContrast(p=0.1),
-            # A.OneOf([
-            #     A.Blur(blur_limit=3, p=0.5),
-            #     A.ColorJitter(p=0.5),
-            # ], p=1.0),
+            A.augmentations.transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
             ToTensorV2(),
-            A.augmentations.transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
         ], bbox_params=A.BboxParams(format='coco'))
     
     return transform
@@ -51,7 +46,7 @@ class SourceDataset(Dataset):
         # get ids
         self.ids = list(sorted(self.coco.imgs.keys()))
         self.ids = [id for id in self.ids if (len(self._load_target(id)) > 0)]
-        
+        self.root = root
         self.split = split
         self.transform = transform
         # TODO
@@ -63,6 +58,7 @@ class SourceDataset(Dataset):
         # path: org/val/2575.png
         # img = cv2.imread(os.path.join(self.img_path, path))
         img = np.array(Image.open(os.path.join(self.root, path)).convert('RGB'))
+        # img = np.array(Image.open(os.path.join(self.root, path)))
         return img
 
     def _load_target(self, index: int):
@@ -77,7 +73,6 @@ class SourceDataset(Dataset):
         boxes = [t['bbox'] + [t['category_id']] for t in target]
         if self.transform is not None:
             transformed = self.transform(image=image, bboxes=boxes)
-        
             image = transformed['image']
             boxes = transformed['bboxes']
         # xmin, ymin, w, h -> xmin, ymin, xmax, ymax
@@ -90,6 +85,7 @@ class SourceDataset(Dataset):
             new_boxes.append([xmin, ymin, xmax, ymax])
         
         boxes = torch.tensor(new_boxes, dtype=torch.float32)
+        boxes = boxes.reshape(-1,4)
         
         targ = {}
         targ["boxes"] = boxes
@@ -100,6 +96,7 @@ class SourceDataset(Dataset):
         
         # TODO: make sure your image is scaled properly
         # return image and target
+        # print(image)
         return image, targ
 
     def __len__(self) -> int:
@@ -127,8 +124,10 @@ class TargetDataset(Dataset):
         if self.split == "fog/val":
             path = self.coco.loadImgs(index)[0]['file_name']
             image = np.array(Image.open(os.path.join(self.root, path)).convert('RGB'))
+            # image = np.array(Image.open(os.path.join(self.root, path)))
         else:
             image = np.array(Image.open(os.path.join(self.root, self.split, self.ids[index])).convert('RGB'))
+            # image = np.array(Image.open(os.path.join(self.root, self.split, self.ids[index])))
         return image
 
     def _load_target(self, index: int):

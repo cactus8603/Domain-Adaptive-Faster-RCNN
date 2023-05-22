@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
 import random
 
 import torch
@@ -20,8 +20,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from tensorboardX import SummaryWriter
 # from torch.cuda import amp
-from utils.utils import build_dataloader, train_one_epoch, validation
-from utils.parser import parser_args
+from utils.utils import build_dataloader, train_one_epoch, validation, train_source_one_peoch
+from utils.parser import create_parser
 from model import DA_model
 # from pycocotools.coco import COCO
 
@@ -44,7 +44,7 @@ def is_main_worker(gpu):
 
 # mp.spawn will pass the value "gpu" as rank
 def train_ddp(rank, world_size, args):
-
+    print("start dist")
     port = args.port
     dist.init_process_group(
         backend='nccl',
@@ -56,27 +56,27 @@ def train_ddp(rank, world_size, args):
     train(args, ddp_gpu=rank)
     cleanup()
 
-
 # train function
-def train(args, ddp_gpu=-1):
-    cudnn.benchmark = True
+def train(args):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # print("ddp_gpu:", ddp_gpu)
+    # cudnn.benchmark = True
 
     # set gpu of each multiprocessing
-    torch.cuda.set_device(ddp_gpu)
+    # torch.cuda.set_device(ddp_gpu)
 
     # define model
     # model = DA_model(args.n_classes, load_source_model=False, ddp_gpu)
 
     # source model
-    model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(pretrained=True)
+    model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights='COCO_V1')
+    # model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(pretrained=True)
     in_features = model.roi_heads.box_predictor.cls_score.in_features # we need to change the head
     model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, args.n_classes)
 
-    # setting Distributed 
-    if args.use_ddp:   
-        # source model
-        model = DDP(model.to(ddp_gpu))
-        # model = DDP(model(args).to(ddp_gpu))
+
+    model = model.to(device)
+
     
     # setting optim
     pg = [p for p in model.parameters() if p.requires_grad]
@@ -98,76 +98,93 @@ def train(args, ddp_gpu=-1):
 
 
     # check if folder exist and start summarywriter on main worker
-    if is_main_worker(ddp_gpu):
-        print("Start Training")
-        if not os.path.exists(args.save_path):
-            os.mkdir(args.save_path)
+    print("Start Training")
+    if not os.path.exists(args.save_path):
+        os.mkdir(args.save_path)
         tb_writer = SummaryWriter(args.save_path)
     
 
     # start training
     for epoch in range(num_epochs):
-        loss = train_one_epoch(
+
+        ### for source 
+        loss = train_source_one_peoch(
             model, 
             optimizer, 
             source_loader, 
-            target_loader, 
-            epoch
+            epoch, 
+            device=device
         )
+
         scheduler.step()
 
-        map_50, map_75, map_small, map_medium, map_large = validation(model, val_loader)
+        map_50, map_75, map_small, map_medium, map_large = validation(model, source_val_loader)
+
+
+        ### for domain
+        # loss = train_one_epoch(
+        #     model, 
+        #     optimizer, 
+        #     source_loader, 
+        #     target_loader, 
+        #     epoch
+        # )
+
+        # scheduler.step()
+
+        # map_50, map_75, map_small, map_medium, map_large = validation(model, val_loader)
+
+        
+            # torch.save(model.state_dict(), ...)
+
+
+        # write info into summarywriter
+        tags = ["loss", "map_50", "map_75", "map_small", "map_medium", "map_large", "lr"]
+        tb_writer.add_scalar(tags[0], loss, epoch)
+        tb_writer.add_scalar(tags[1], map_50, epoch)
+        tb_writer.add_scalar(tags[2], map_75, epoch)
+        tb_writer.add_scalar(tags[3], map_small, epoch)
+        tb_writer.add_scalar(tags[4], map_medium, epoch)
+        tb_writer.add_scalar(tags[5], map_large, epoch)
+        tb_writer.add_scalar(tags[6], optimizer.param_groups[0]['lr'], epoch)
+
+        # save model of 0%, 33%, 66%, 100%
+        if (epoch == 0):
+            save_path = os.path.join(args.save_path, "model_0.pth")
+            torch.save(model.state_dict(), save_path)
+        elif (epoch == int(args.epoch * 0.33 - 1)):
+            save_path = os.path.join(args.save_path, "model_33.pth")
+            torch.save(model.state_dict(), save_path)
+        elif (epoch == int(args.epoch * 0.66 - 1)):
+            save_path = os.path.join(args.save_path, "model_66.pth")
+            torch.save(model.state_dict(), save_path)
+        elif (epoch == args.epoch - 1):
+            save_path = os.path.join(args.save_path, "model_100.pth")
+            torch.save(model.state_dict(), save_path)
+
+        # save model of best epoch
         if map_50 > best_map:
             best_map = map_50
             best_epoch = epoch
-            # torch.save(model.state_dict(), ...)
-
-        # main worker
-        if is_main_worker(ddp_gpu):
-            # write info into summarywriter
-            tags = ["loss", "map_50", "map_75", "map_small", "map_medium", "map_large", "lr"]
-            tb_writer.add_scalar(tags[0], loss, epoch)
-            tb_writer.add_scalar(tags[1], map_50, epoch)
-            tb_writer.add_scalar(tags[2], map_75, epoch)
-            tb_writer.add_scalar(tags[3], map_small, epoch)
-            tb_writer.add_scalar(tags[4], map_medium, epoch)
-            tb_writer.add_scalar(tags[5], map_large, epoch)
-            tb_writer.add_scalar(tags[6], optimizer.param_groups[0]['lr'], epoch)
-
-            # save model of 0%, 33%, 66%, 100%
-            if (epoch == 0):
-                save_path = os.path.join(args.save_path, "model_0.pth")
-                torch.save(model.state_dict(), save_path)
-            elif (epoch == int(args.epoch * 0.33 - 1)):
-                save_path = os.path.join(args.save_path, "model_33.pth")
-                torch.save(model.state_dict(), save_path)
-            elif (epoch == int(args.epoch * 0.66 - 1)):
-                save_path = os.path.join(args.save_path, "model_66.pth")
-                torch.save(model.state_dict(), save_path)
-            elif (epoch == args.epoch - 1):
-                save_path = os.path.join(args.save_path, "model_100.pth")
-                torch.save(model.state_dict(), save_path)
-
-            # save model of best epoch
-            if (best_epoch == epoch):
-                save_path = os.path.join(args.save_path, "best_model.pth")
-                torch.save(model.state_dict(), save_path)
+            save_path = os.path.join(args.save_path, "best_model.pth")
+            torch.save(model.state_dict(), save_path)
 
       
 
-
 if __name__ == '__main__':
     # get args
-    args = parser_args()
+    args = create_parser()
     # args_dict = vars(args)
-    print(args)
+    # print(args)
     init(args.seed)
 
     # train in ddp or not
-    if args.use_ddp:
-        n_gpus_per_node = torch.cuda.device_count()
-        world_size = n_gpus_per_node
-        mp.spawn(train_ddp, nprocs=n_gpus_per_node, args=(world_size, args))
+    train(args)
+
+    # if args.use_ddp:
+    #     n_gpus_per_node = torch.cuda.device_count()
+    #     world_size = n_gpus_per_node
+    #     mp.spawn(train_ddp, nprocs=n_gpus_per_node, args=(world_size, args))
     # else:
         # train(args_dict)
 
