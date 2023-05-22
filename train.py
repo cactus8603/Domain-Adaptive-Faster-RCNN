@@ -1,12 +1,12 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 import random
 
 import torch
 import math
 import numpy as np
 # import timm
-# import torchvision
+import torchvision
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 # import logging
@@ -43,9 +43,9 @@ def is_main_worker(gpu):
     return (gpu <= 0)
 
 # mp.spawn will pass the value "gpu" as rank
-def train_ddp(rank, world_size, args_dict):
+def train_ddp(rank, world_size, args):
 
-    port = args_dict['port']
+    port = args.port
     dist.init_process_group(
         backend='nccl',
         init_method="tcp://127.0.0.1:" + str(port),
@@ -53,38 +53,44 @@ def train_ddp(rank, world_size, args_dict):
         rank=rank,
     )
 
-    train(args_dict, ddp_gpu=rank)
+    train(args, ddp_gpu=rank)
     cleanup()
 
 
 # train function
-def train(args_dict, ddp_gpu=-1):
+def train(args, ddp_gpu=-1):
     cudnn.benchmark = True
 
     # set gpu of each multiprocessing
     torch.cuda.set_device(ddp_gpu)
 
     # define model
-    model = DA_model(args_dict.n_classes, load_source_model=False)
+    # model = DA_model(args.n_classes, load_source_model=False, ddp_gpu)
+
+    # source model
+    model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(pretrained=True)
+    in_features = model.roi_heads.box_predictor.cls_score.in_features # we need to change the head
+    model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, args.n_classes)
 
     # setting Distributed 
-    if args_dict['use_ddp']:   
-        # model = DDP(model.to(ddp_gpu))
-        model = DDP(model(args_dict).to(ddp_gpu))
+    if args.use_ddp:   
+        # source model
+        model = DDP(model.to(ddp_gpu))
+        # model = DDP(model(args).to(ddp_gpu))
     
     # setting optim
     pg = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(pg, lr=args_dict['lr'], momentum=args_dict['momentum'], weight_decay=args_dict['weight_decay'])
+    optimizer = torch.optim.SGD(pg, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     
     # setting lr scheduler as cosine annealing
-    lf = lambda x: ((1 + math.cos(x * math.pi / args_dict['cosanneal_cycle'])) / 2) * (1 - args_dict['lrf']) + args_dict['lrf']
+    lf = lambda x: ((1 + math.cos(x * math.pi / args.cosanneal_cycle)) / 2) * (1 - args.lrf) + args.lrf
     scheduler = lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lf)
     num_epochs = 50
 
     best_epoch = 0
     data_path = args.data_path
-    batch_size = 32
-    num_workers = 6
+    batch_size = args.batch_size
+    num_workers = args.num_workers
 
     # build dataloader
     source_loader, source_val_loader, target_loader, val_loader = build_dataloader(data_path, batch_size, num_workers)
@@ -94,9 +100,9 @@ def train(args_dict, ddp_gpu=-1):
     # check if folder exist and start summarywriter on main worker
     if is_main_worker(ddp_gpu):
         print("Start Training")
-        if not os.path.exists(args_dict['model_save_path']):
-            os.mkdir(args_dict['model_save_path'])
-        tb_writer = SummaryWriter(args_dict['model_save_path'])
+        if not os.path.exists(args.save_path):
+            os.mkdir(args.save_path)
+        tb_writer = SummaryWriter(args.save_path)
     
 
     # start training
@@ -114,11 +120,12 @@ def train(args_dict, ddp_gpu=-1):
         if map_50 > best_map:
             best_map = map_50
             best_epoch = epoch
-            torch.save(model.state_dict(), ...)
+            # torch.save(model.state_dict(), ...)
 
-        # write info into summarywriter in main worker
+        # main worker
         if is_main_worker(ddp_gpu):
-            tags = ["train_loss", "train_acc", "val_loss", "val_acc", "lr"]
+            # write info into summarywriter
+            tags = ["loss", "map_50", "map_75", "map_small", "map_medium", "map_large", "lr"]
             tb_writer.add_scalar(tags[0], loss, epoch)
             tb_writer.add_scalar(tags[1], map_50, epoch)
             tb_writer.add_scalar(tags[2], map_75, epoch)
@@ -127,26 +134,42 @@ def train(args_dict, ddp_gpu=-1):
             tb_writer.add_scalar(tags[5], map_large, epoch)
             tb_writer.add_scalar(tags[6], optimizer.param_groups[0]['lr'], epoch)
 
-            # save model every two epoch 
-            if (epoch % args_dict['save_frequency'] == 0 and epoch >= 10):
-                save_path = args_dict['model_save_path'] + "/model_{}_{:.3f}_.pth".format(epoch, map_50)
+            # save model of 0%, 33%, 66%, 100%
+            if (epoch == 0):
+                save_path = os.path.join(args.save_path, "model_0.pth")
                 torch.save(model.state_dict(), save_path)
+            elif (epoch == int(args.epoch * 0.33 - 1)):
+                save_path = os.path.join(args.save_path, "model_33.pth")
+                torch.save(model.state_dict(), save_path)
+            elif (epoch == int(args.epoch * 0.66 - 1)):
+                save_path = os.path.join(args.save_path, "model_66.pth")
+                torch.save(model.state_dict(), save_path)
+            elif (epoch == args.epoch - 1):
+                save_path = os.path.join(args.save_path, "model_100.pth")
+                torch.save(model.state_dict(), save_path)
+
+            # save model of best epoch
+            if (best_epoch == epoch):
+                save_path = os.path.join(args.save_path, "best_model.pth")
+                torch.save(model.state_dict(), save_path)
+
+      
 
 
 if __name__ == '__main__':
     # get args
     args = parser_args()
-    args_dict = vars(args)
-
-    init(args_dict['seed'])
+    # args_dict = vars(args)
+    print(args)
+    init(args.seed)
 
     # train in ddp or not
-    if args_dict['use_ddp']:
+    if args.use_ddp:
         n_gpus_per_node = torch.cuda.device_count()
         world_size = n_gpus_per_node
-        mp.spawn(train_ddp, nprocs=n_gpus_per_node, args=(world_size, args_dict))
-    else:
-        train(args_dict)
+        mp.spawn(train_ddp, nprocs=n_gpus_per_node, args=(world_size, args))
+    # else:
+        # train(args_dict)
 
 
     

@@ -19,6 +19,7 @@ def build_dataloader(data_path, batch_size, num_workers):
         return tuple(zip(*batch))
     
     source_dataset = SourceDataset(root=data_path, split="org/train", transform=get_transform(mode='train'))
+    # source_val is used for training source model
     source_val_dataset = SourceDataset(root=data_path, split="org/val", transform=get_transform(mode='val'))
     target_dataset = TargetDataset(root=data_path, split="fog/train", transform=get_transform(mode='train'))
     val_dataset = TargetDataset(root=data_path, split="fog/val", transform=get_transform(mode='val') )

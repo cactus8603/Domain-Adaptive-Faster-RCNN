@@ -155,18 +155,18 @@ class DomainAdaptationModule(torch.nn.Module):
     def __init__(self):
         super(DomainAdaptationModule, self).__init__()
 
-        self.img_weight = ...
-        self.ins_weight = ...
-        self.cst_weight = ...
+        self.img_weight = 1.0
+        self.ins_weight = 1.0
+        self.cst_weight = 0.1
 
-        grl_weight = ...
+        grl_weight = 0.1
         self.grl_img = GradientScalarLayer(-1.0*grl_weight)
         self.grl_ins = GradientScalarLayer(-1.0*grl_weight)
         self.grl_img_consist = GradientScalarLayer(1.0*grl_weight)
         self.grl_ins_consist = GradientScalarLayer(1.0*grl_weight)
         
-        in_channels = ...
-        num_ins_inputs = ...
+        in_channels = 256
+        num_ins_inputs = 1024
         self.imghead = DAImgHead(in_channels)
         self.inshead = DAInsHead(num_ins_inputs)
 

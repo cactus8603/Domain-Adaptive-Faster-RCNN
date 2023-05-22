@@ -171,7 +171,7 @@ class TargetDataset(Dataset):
             # return image and target
         
             return image, targ
-            
+        # for fog/train
         else:
             image = self._load_image(index)
             # img = self.transform(image)

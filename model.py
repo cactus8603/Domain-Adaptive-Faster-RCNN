@@ -5,11 +5,13 @@ from da_heads import DomainAdaptationModule
 
 
 class DA_model(nn.Module):
-    def __init__(self, n_classes, load_source_model=False) -> None:
+    def __init__(self, n_classes, load_source_model=False, ddp_gpu) -> None:
         super().__init__()
 
         # setup main object detection model
-        self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn(...)
+        # 
+        self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(pretrained=True, weights='COCO_V1')
+        
         # - you can modify the backbone on your own
         # self.model.backbone = ...
         # - modify n_classes by replacing the box predictor
@@ -17,11 +19,13 @@ class DA_model(nn.Module):
         self.model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, n_classes) 
         
         if load_source_model:
-            msg = self.model.load_state_dict(...)
-            print(msg)
+            print("not yet")
+            # msg = self.model.load_state_dict(...)
+            # print(msg)
 
         self.create_hooks()
         self.da_model = DomainAdaptationModule()
+        self.device = 'cuda:' + str(self.device)
     
     def create_hooks(self):
         # setup hooks for hooking features needed by domain adaptation
@@ -33,7 +37,9 @@ class DA_model(nn.Module):
 
     def gen_instance_level_domain_labels(self, domain_labels):
         # TODO
-        ...
+        labels = torch.cat([torch.zeros(len(self.box_features[0])), torch.ones(len(self.box_features[1]))],).to(self.device)
+        return labels
+
         
     def forward(self, x1, gt1=None, x2=None):
         self.backbone_features = []
@@ -41,8 +47,9 @@ class DA_model(nn.Module):
         
         if self.training:
             losses = {}
-            # TODO: forward x1(source data) and x2(target data) then compute OD losses of x1
-            od_losses = ...
+            # TODO: forward x1(source data) and x2(target data) then compute OD losses of x1 
+            od_losses = self.model(x1, gt1)
+            # tar_losses = self.model(x2, gt1)
 
             
             # TODO: complete DA losses
@@ -55,9 +62,11 @@ class DA_model(nn.Module):
                 # just use P-5 features
                 if i != 3: continue
                 backbone_feature_list.append(torch.cat([f1, f2], dim=0)) # [2, C, H, W]
-                
+            
+            ins_feature = torch.cat([self.box_features[0], self.box_features[1]] ).to(self.device)
+
             da_losses = self.da_model(img_features=backbone_feature_list, 
-                                        da_ins_feature=...,
+                                        da_ins_feature=ins_feature,
                                         da_ins_labels=instance_level_domain_labels,
                                         targets=domain_labels)
             
