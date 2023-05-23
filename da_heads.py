@@ -56,7 +56,8 @@ class DALossComputation(object):
             da_consist_loss (Tensor)
         """
 
-        masks = targets.to(torch.bool)
+        # masks = targets.to(torch.bool)
+        masks = 1
         
         da_img_flattened = []
         da_img_labels_flattened = []

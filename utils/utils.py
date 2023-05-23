@@ -13,10 +13,6 @@ from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from .dataset import SourceDataset, TargetDataset, get_transform
 
 def collate_fn(batch):
-    print(len(batch))
-    for data in batch:
-        print(data[0])
-        print(data[1].shape)
     return tuple(zip(*batch))
 
 def build_dataloader(data_path, batch_size, num_workers):
@@ -29,31 +25,33 @@ def build_dataloader(data_path, batch_size, num_workers):
 
     source_loader = DataLoader(source_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, collate_fn=collate_fn)
     source_val_loader = DataLoader(source_val_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, collate_fn=collate_fn)
-    target_loader = DataLoader(target_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, collate_fn=collate_fn)
+    target_loader = DataLoader(target_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, collate_fn=collate_fn)
 
     return source_loader, source_val_loader, target_loader, val_loader
 
 
-def train_one_epoch(model, optimizer, source_loader, target_loader, epoch, device):
+def train_one_epoch(model, optimizer, source_loader, target_loader, args):
     model.train()
 
     scaler = torch.cuda.amp.GradScaler(enabled=False)
     pbar = tqdm(zip(source_loader, target_loader), total=min(len(source_loader), len(target_loader)))
     for i, ((source_images, source_labels), (target_images)) in enumerate(pbar):
 
-        source_images = list(image.to(device, non_blocking=True) for image in source_images) # list of [C, H, W]
-        source_labels = [{k: v.to(device, non_blocking=True) for k, v in t.items()} for t in source_labels]
-        target_images = list(image.to(device, non_blocking=True) for image in target_images) # list of [C, H, W]
+        source_images = list(image.to('cuda', non_blocking=True) for image in source_images) # list of [C, H, W]
+        source_labels = [{k: v.to('cuda', non_blocking=True) for k, v in t.items()} for t in source_labels]
+        target_images = list(image.to('cuda', non_blocking=True) for image in target_images) # list of [C, H, W]
 
-        optimizer.zero_grad(set_to_none=True)
-        with torch.autocast(device_type=device, enabled=False):
+        with torch.autocast(device_type='cuda', enabled=False):
             loss_dict = model(source_images, source_labels, target_images)
             losses = sum(loss for loss in loss_dict.values())
-
+        
         scaler.scale(losses).backward()
-        scaler.step(optimizer)
-        scaler.update()
+
+        if (((i+1) % args.accumulation == 0) or (i+1 == len(source_loader))):
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
 
         pbar.set_postfix({'loss': losses.item()})
     return losses.item()
@@ -80,26 +78,35 @@ def train_source_one_peoch(model, optimizer, train_loader, epoch, device):
     model.train()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    scaler = torch.cuda.amp.GradScaler(enabled=False)
-    pbar = tqdm(train_loader,total=len(train_loader))
+    # scaler = torch.cuda.amp.GradScaler(enabled=False)
+    # pbar = tqdm(total=len(train_loader))
 
-    for imgs, labels in enumerate(pbar):
+    for imgs, labels in tqdm(train_loader):
         # print(labels)
-        print(imgs)
-        print(type(imgs), type(labels))
+        # print(imgs.shape)
+        
         imgs = list(image.to(device, non_blocking=True) for image in imgs)
         labels = [{k: v.to(device, non_blocking=True) for k, v in t.items()} for t in labels]
- 
-        optimizer.zero_grad(set_to_none=True)
+        # print(labels)
+        # print(imgs)
+        # print((imgs[0]))
+        # print(len(imgs[0]), len(labels))
+        # print(type(imgs), type(labels))
+
+        
         with autocast():
             pred = model(imgs, labels)
             losses = sum(i for i in pred.values())
         
-        scaler.scale(losses).backward()
-        scaler.step(optimizer)
-        scaler.update()
+        losses.backward()
+        optimizer.step()
+        optimizer.zero_grad()
 
-        pbar.set_postfix({'loss': losses.item()})
+        # scaler.scale(losses).backward()
+        # scaler.step(optimizer)
+        # scaler.update()
+
+        # pbar.set_postfix({'loss': losses.item()})
 
     return losses.item()
       

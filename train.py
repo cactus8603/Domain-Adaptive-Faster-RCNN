@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 import random
 
 import torch
@@ -58,7 +58,7 @@ def train_ddp(rank, world_size, args):
 
 # train function
 def train(args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # print("ddp_gpu:", ddp_gpu)
     # cudnn.benchmark = True
 
@@ -66,13 +66,12 @@ def train(args):
     # torch.cuda.set_device(ddp_gpu)
 
     # define model
-    # model = DA_model(args.n_classes, load_source_model=False, ddp_gpu)
+    model = DA_model(args.n_classes, device, load_source_model=True)
 
     # source model
-    model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights='COCO_V1')
-    # model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(pretrained=True)
-    in_features = model.roi_heads.box_predictor.cls_score.in_features # we need to change the head
-    model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, args.n_classes)
+    # model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights='COCO_V1')
+    # in_features = model.roi_heads.box_predictor.cls_score.in_features # we need to change the head
+    # model.roi_heads.box_predictor = torchvision.models.detection.faster_rcnn.FastRCNNPredictor(in_features, args.n_classes)
 
 
     model = model.to(device)
@@ -85,7 +84,7 @@ def train(args):
     # setting lr scheduler as cosine annealing
     lf = lambda x: ((1 + math.cos(x * math.pi / args.cosanneal_cycle)) / 2) * (1 - args.lrf) + args.lrf
     scheduler = lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lf)
-    num_epochs = 50
+    num_epochs = args.epoch
 
     best_epoch = 0
     data_path = args.data_path
@@ -94,49 +93,48 @@ def train(args):
 
     # build dataloader
     source_loader, source_val_loader, target_loader, val_loader = build_dataloader(data_path, batch_size, num_workers)
-    best_map = map_50 = validation(model, val_loader)
-
+    # best_map = map_50 = validation(model, val_loader)
+    best_map = 0
+    map_50 = 0
+    best_epoch = 0
 
     # check if folder exist and start summarywriter on main worker
     print("Start Training")
     if not os.path.exists(args.save_path):
         os.mkdir(args.save_path)
-        tb_writer = SummaryWriter(args.save_path)
+    tb_writer = SummaryWriter(args.save_path)
     
 
     # start training
     for epoch in range(num_epochs):
 
         ### for source 
-        loss = train_source_one_peoch(
-            model, 
-            optimizer, 
-            source_loader, 
-            epoch, 
-            device=device
-        )
-
-        scheduler.step()
-
-        map_50, map_75, map_small, map_medium, map_large = validation(model, source_val_loader)
-
-
-        ### for domain
-        # loss = train_one_epoch(
+        # loss = train_source_one_peoch(
         #     model, 
         #     optimizer, 
         #     source_loader, 
-        #     target_loader, 
-        #     epoch
+        #     epoch, 
+        #     device=device
         # )
 
         # scheduler.step()
 
-        # map_50, map_75, map_small, map_medium, map_large = validation(model, val_loader)
+        # map_50, map_75, map_small, map_medium, map_large = validation(model, source_val_loader)
 
-        
-            # torch.save(model.state_dict(), ...)
+        # print(device)
+        ### for domain
+        loss = train_one_epoch(
+            model, 
+            optimizer, 
+            source_loader, 
+            target_loader, 
+            args
+            # accumulation=args.accumulation
+        )
 
+        scheduler.step()
+
+        map_50, map_75, map_small, map_medium, map_large = validation(model, val_loader)
 
         # write info into summarywriter
         tags = ["loss", "map_50", "map_75", "map_small", "map_medium", "map_large", "lr"]

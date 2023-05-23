@@ -24,16 +24,17 @@ def get_transform(mode, *args, **kwargs):
                 A.ColorJitter(p=0.5),
             ], p=1.0),
             A.augmentations.transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            ToTensorV2(),
+            ToTensorV2()
         ], bbox_params=A.BboxParams(format='coco'))
     elif mode == 'val' :
         transform = A.Compose([
             A.Resize(480,480),
             A.augmentations.transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            ToTensorV2(),
+            ToTensorV2()
         ], bbox_params=A.BboxParams(format='coco'))
     
     return transform
+
 
 class SourceDataset(Dataset):
 
@@ -57,8 +58,8 @@ class SourceDataset(Dataset):
         # root: path to folder
         # path: org/val/2575.png
         # img = cv2.imread(os.path.join(self.img_path, path))
-        img = np.array(Image.open(os.path.join(self.root, path)).convert('RGB'))
-        # img = np.array(Image.open(os.path.join(self.root, path)))
+        # img = np.array(Image.open(os.path.join(self.root, path)).convert('RGB'))
+        img = np.array(Image.open(os.path.join(self.root, path)))
         return img
 
     def _load_target(self, index: int):
@@ -89,7 +90,7 @@ class SourceDataset(Dataset):
         
         targ = {}
         targ["boxes"] = boxes
-        targ["labels"] = torch.tensor([t["category_id"]  for t in target], dtype=torch.int64)
+        targ["labels"] = torch.tensor([t["category_id"] - 1  for t in target], dtype=torch.int64)
         targ["image_id"] = torch.tensor([t["image_id"]  for t in target])
         targ["area"] = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
         targ["iscrowd"] = torch.tensor([t["iscrowd"]  for t in target], dtype=torch.int64)
@@ -161,7 +162,7 @@ class TargetDataset(Dataset):
             targ = {}
 
             targ["boxes"] = boxes
-            targ["labels"] = torch.tensor([t["category_id"]-1  for t in target], dtype=torch.int64)
+            targ["labels"] = torch.tensor([t["category_id"] - 1  for t in target], dtype=torch.int64)
             targ["image_id"] = torch.tensor([t["image_id"]  for t in target])
             targ["area"] = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
             targ["iscrowd"] = torch.tensor([t["iscrowd"]  for t in target], dtype=torch.int64)
